@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Den giao thong</title>
+<script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #f4f6f8; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  h2 { font-size: 16px; margin: 0 0 8px; }
+  label { display: block; font-size: 14px; margin-top: 8px; }
+  input, select { width: 100%; padding: 8px; font-size: 16px; box-sizing: border-box; margin-top: 4px; }
+  input:disabled { background: #eee; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  button { width: 100%; padding: 12px; font-size: 16px; border: 0; border-radius: 8px; background: #1976d2; color: #fff; margin-top: 12px; cursor: pointer; }
+  button:active { opacity: .8; }
+  .status { font-size: 15px; line-height: 1.7; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #c62828; margin-right: 6px; }
+  .dot.on { background: #2e7d32; }
+  .msg { font-size: 14px; color: #555; margin-top: 8px; min-height: 18px; }
+</style>
+</head>
+<body>
+
+<h1>Den giao thong - Dieu khien</h1>
+
+<div class="card">
+  <h2>Ket noi MQTT</h2>
+  <label>Broker (WebSocket)</label>
+  <input id="broker" value="wss://test.mosquitto.org:8081">
+  <label>Topic goc cua thiet bi</label>
+  <input id="prefix" value="traffic/tlight-esp32-01">
+  <button id="btnConnect">Ket noi</button>
+  <div class="msg"><span class="dot" id="dot"></span><span id="connText">Chua ket noi</span></div>
+</div>
+
+<div class="card">
+  <h2>Trang thai hien tai</h2>
+  <div class="status">
+    Gio: <b id="stTime">--:--:--</b><br>
+    Che do dang chay: <b id="stMode">--</b><br>
+    Xanh: <b id="stG">-</b> s &nbsp; Vang: <b id="stY">-</b> s &nbsp; Do: <b id="stR">-</b> s
+  </div>
+</div>
+
+<div class="card">
+  <h2>Cai dat che do</h2>
+  <label>Che do</label>
+  <select id="mode">
+    <option value="0">SANG</option>
+    <option value="1">TRUA</option>
+    <option value="2">CHIEU</option>
+    <option value="3">BINH THUONG (con lai)</option>
+  </select>
+
+  <div class="row">
+    <div>
+      <label>Gio bat dau</label>
+      <input id="f_sh" type="number" min="0" max="23" value="6">
+    </div>
+    <div>
+      <label>Phut bat dau</label>
+      <input id="f_sm" type="number" min="0" max="59" value="0">
+    </div>
+    <div>
+      <label>Gio ket thuc</label>
+      <input id="f_eh" type="number" min="0" max="23" value="11">
+    </div>
+    <div>
+      <label>Phut ket thuc</label>
+      <input id="f_em" type="number" min="0" max="59" value="59">
+    </div>
+  </div>
+
+  <div class="row3">
+    <div>
+      <label>Xanh (s)</label>
+      <input id="f_g" type="number" min="1" max="99" value="15">
+    </div>
+    <div>
+      <label>Vang (s)</label>
+      <input id="f_y" type="number" min="1" max="99" value="3">
+    </div>
+    <div>
+      <label>Do (s)</label>
+      <input id="f_r" type="number" min="1" max="99" value="15">
+    </div>
+  </div>
+
+  <button id="btnSend">Gui cai dat</button>
+  <div class="msg" id="sendMsg"></div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let client = null;
+  let prefix = "";
+
+  function setConn(on, text) {
+    $("dot").classList.toggle("on", on);
+    $("connText").textContent = text;
+  }
+
+  function connect() {
+    if (client) client.end(true);
+    const url = $("broker").value.trim();
+    prefix = $("prefix").value.trim().replace(/\/+$/, "");
+
+    client = mqtt.connect(url, {
+      clientId: "web-" + Math.random().toString(16).slice(2, 8),
+      clean: true,
+      reconnectPeriod: 3000
+    });
+
+    client.on("connect", () => {
+      setConn(true, "Da ket noi");
+      client.subscribe(prefix + "/status");
+    });
+    client.on("reconnect", () => setConn(false, "Dang ket noi lai..."));
+    client.on("close", () => setConn(false, "Mat ket noi"));
+    client.on("error", e => setConn(false, "Loi: " + e.message));
+
+    client.on("message", (topic, payload) => {
+      if (topic !== prefix + "/status") return;
+      try {
+        const s = JSON.parse(payload.toString());
+        $("stTime").textContent = s.time;
+        $("stMode").textContent = s.mode;
+        $("stG").textContent = s.green;
+        $("stY").textContent = s.yellow;
+        $("stR").textContent = s.red;
+      } catch (e) {
+        console.log("Sai JSON:", payload.toString());
+      }
+    });
+  }
+
+  function updateTimeFields() {
+    const isNormal = $("mode").value === "3";
+    ["f_sh", "f_sm", "f_eh", "f_em"].forEach(id => $(id).disabled = isNormal);
+  }
+
+  function sendSettings() {
+    $("sendMsg").textContent = "";
+    if (!client || !client.connected) {
+      $("sendMsg").textContent = "Chua ket noi MQTT";
+      return;
+    }
+
+    const m = parseInt($("mode").value, 10);
+    const ids = ["f_sh", "f_sm", "f_eh", "f_em", "f_g", "f_y", "f_r"];
+    const vals = ids.map(id => parseInt($(id).value, 10));
+
+    if (vals.some(v => Number.isNaN(v))) {
+      $("sendMsg").textContent = "Co o chua nhap so";
+      return;
+    }
+
+    const payload = m + ";" + vals.join(",");
+    client.publish(prefix + "/set", payload);
+    $("sendMsg").textContent = "Da gui: " + payload;
+  }
+
+  $("btnConnect").addEventListener("click", connect);
+  $("btnSend").addEventListener("click", sendSettings);
+  $("mode").addEventListener("change", updateTimeFields);
+  updateTimeFields();
+</script>
+
+</body>
+</html>
